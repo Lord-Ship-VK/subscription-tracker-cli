@@ -1,2 +1,164 @@
-# subscription-tracker-cli
-A terminal-based subscription manager featuring CRUD operations, expense analytics, and renewal alerts.
+# SmartSub — Subscription Expense Tracker & Analyzer
+
+A command-line application designed to help users track, manage, and analyze their recurring subscriptions. It runs entirely in the terminal, requires no external databases or dependencies, and persists data locally using JSON. 
+
+This project was built as a comprehensive Python Essentials academic project, demonstrating clean architecture, modularity, pure/impure function separation, and robust test-driven development using the Python standard library.
+
+## Key Features
+
+- **CRUD Operations**: Add, list, update, and delete subscriptions.
+- **Categorization**: Group subscriptions by category (Entertainment, Education, Productivity, Cloud Storage, Software, Other).
+- **Expense Analytics**: View total counts, monthly/yearly spending breakdowns, and identify your most expensive subscription.
+- **Renewal Alerts**: Get notified of any subscriptions renewing in the next 7 days.
+- **Automated Renewal Handling**: Stale billing dates are automatically advanced to the next valid billing cycle (accounting for month-end clamping and leap years).
+- **Savings Analyzer**: An interactive tool to calculate potential monthly and yearly savings from hypothetical cancellations.
+- **Search & Filter**: Search subscriptions by partial name and/or exact category.
+- **CSV Export**: Generate a clean CSV report of all subscriptions and their monthly/yearly cost equivalents.
+- **JSON Persistence**: All data is stored locally in a human-readable JSON file.
+
+## Technologies Used
+
+- **Python** (Standard library only; no external dependencies)
+- **JSON** (`json` module for data persistence)
+- **CSV** (`csv` module for report generation)
+- **unittest** (Standard library testing framework)
+- **argparse** (Command-line interface routing)
+
+## Requirements
+
+- Python 3.6+
+
+## Installation
+
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd subscription-tracker-cli
+   ```
+
+2. (Optional) Run the test suite to verify the installation:
+   ```bash
+   python3 -m unittest discover tests -v
+   ```
+   *Current status: 51 tests passing.*
+
+## Usage
+
+Run the application as a Python module from the root directory:
+
+```bash
+python3 -m src.main <command> [arguments]
+```
+
+### 1. Add a Subscription
+Adds a new subscription to the tracker.
+```bash
+python3 -m src.main add "Netflix Premium" 19.99 monthly 2026-10-15 --category Entertainment
+```
+*Note: Valid categories are Entertainment, Education, Productivity, Cloud Storage, Software, and Other. If omitted, defaults to 'Other'. Cycle must be `monthly` or `yearly`.*
+
+### 2. List Subscriptions
+Displays all subscriptions in a clean, tabular format.
+```bash
+python3 -m src.main list
+```
+
+### 3. Update a Subscription
+Updates specific fields of an existing subscription by ID. Only the provided flags are modified.
+```bash
+python3 -m src.main update 1 --cost 22.99 --category Entertainment
+```
+
+### 4. Delete a Subscription
+Removes a subscription permanently by ID.
+```bash
+python3 -m src.main delete 1
+```
+
+### 5. Search / Filter
+Finds subscriptions matching a partial name and/or a specific category.
+```bash
+# Search by name only
+python3 -m src.main search "net"
+
+# Filter by category only
+python3 -m src.main search --category Software
+
+# Combine name and category (AND logic)
+python3 -m src.main search "pro" --category Software
+```
+
+### 6. Expense Analytics
+Shows total subscription counts, total monthly and yearly costs, and a breakdown by category. Yearly subscriptions are correctly divided by 12 to calculate the "monthly equivalent" cost, and vice versa.
+```bash
+python3 -m src.main analytics
+```
+
+### 7. Renewal Alerts
+Checks all active subscriptions and alerts you to any that are renewing within the next 7 days.
+```bash
+python3 -m src.main alerts
+```
+
+### 8. Savings Analyzer
+An interactive utility that lets you enter a comma-separated list of subscription IDs you are considering cancelling. It calculates the hypothetical monthly and yearly savings without actually deleting the subscriptions.
+```bash
+python3 -m src.main savings
+```
+
+### 9. CSV Export
+Exports all subscription data, including calculated monthly and yearly equivalent costs, to a CSV file. The file is saved at `reports/subscription_report.csv`.
+```bash
+python3 -m src.main export
+```
+
+## Data Storage & Architecture
+
+- **Runtime Data**: Stored in `data/subscriptions.json`. The application handles missing files or empty states gracefully.
+- **Renewal Date Refresh**: Every time data is loaded from the JSON file, the application checks if any renewal dates have passed. If they have, it advances them automatically based on their billing cycle (e.g., adding exactly 1 month or 1 year while clamping correctly for month-end dates like Jan 31st) and silently saves the updated dates back to disk.
+
+## Project Structure
+
+```text
+subscription-tracker-cli/
+├── data/
+│   └── subscriptions.json       # Runtime JSON database
+├── reports/
+│   └── subscription_report.csv  # Generated by the export command
+├── src/
+│   ├── __init__.py
+│   ├── alerts.py                # 7-day renewal logic
+│   ├── analytics.py             # Expense breakdown math
+│   ├── export.py                # CSV generation
+│   ├── main.py                  # CLI entry point (argparse)
+│   ├── manager.py               # Core CRUD logic
+│   ├── models.py                # Subscription class & categories
+│   ├── savings.py               # Interactive savings calculator
+│   ├── search.py                # Filtering logic
+│   ├── storage.py               # JSON load/save operations
+│   └── utils.py                 # Input validation & date arithmetic
+├── tests/
+│   ├── __init__.py
+│   └── test_tracker.py          # 51 unit tests
+├── .gitignore
+└── README.md
+```
+
+## Error Handling
+The application validates all input heavily:
+- Ensures IDs exist and are integers.
+- Validates that names are not empty.
+- Ensures costs are positive floats.
+- Validates dates use the strict `YYYY-MM-DD` format.
+- Validates categories against the strictly allowed list.
+
+## Known Limitations
+- **ID Reuse**: If the subscription with the highest ID is deleted, its ID will be reused by the next added subscription.
+- **Date Drift**: If a monthly subscription is set to renew on the 31st of the month, advancing it through February will permanently clamp its future renewal dates to the 28th (or 29th). This is standard behavior in many real-world billing systems.
+
+## Future Enhancements
+*(These are potential ideas for future iterations, not currently implemented)*
+- Multi-currency support and live conversion rates.
+- Cloud syncing to a remote database (e.g., Google Sheets or Firebase).
+- Support for weekly or quarterly billing cycles.
+- A graphical or web-based frontend.
