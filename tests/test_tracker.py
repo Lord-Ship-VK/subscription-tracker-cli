@@ -4,6 +4,7 @@ import tempfile
 import sys
 import io
 import json
+from unittest.mock import patch
 from datetime import date
 from src import storage, manager, analytics, alerts, utils
 
@@ -54,10 +55,16 @@ class TestSubscriptionTracker(unittest.TestCase):
             utils.validate_cost(0.0)
         with self.assertRaises(ValueError):
             utils.validate_cost(-5.0)
+        with self.assertRaises(ValueError):
+            utils.validate_cost(float("nan"))
+        with self.assertRaises(ValueError):
+            utils.validate_cost(float("inf"))
 
     def test_invalid_date(self):
         with self.assertRaises(ValueError):
             utils.validate_date("2026-13-40")
+        with self.assertRaises(ValueError):
+            utils.validate_date("2026-1-1")
 
     def test_analytics_calculations(self):
         manager.add_subscription("Netflix", 10.0, "monthly", "2026-10-01")
@@ -755,6 +762,230 @@ class TestExportReport(unittest.TestCase):
         after_dicts = [s.to_dict() for s in after]
 
         self.assertEqual(before_dicts, after_dicts)
+
+
+class TestInteractiveMenu(unittest.TestCase):
+    """Tests for the no-argument application menu and its CLI compatibility."""
+
+    def setUp(self):
+        self.fd, self.temp_file = tempfile.mkstemp(suffix='.json')
+        self.original_data_file = storage.DATA_FILE
+        storage.set_data_file(self.temp_file)
+        with open(self.temp_file, 'w') as f:
+            f.write("[]")
+
+    def tearDown(self):
+        storage.set_data_file(self.original_data_file)
+        os.close(self.fd)
+        os.remove(self.temp_file)
+
+    def test_no_argument_entry_adds_subscription_interactively(self):
+        from src import main as app
+
+        output = io.StringIO()
+        answers = [
+            "1", "Netflix", "15.99", "monthly", "2027-12-01",
+            "Entertainment", "0",
+        ]
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=answers), \
+                patch("sys.stdout", output):
+            app.main()
+
+        subscriptions = storage.load_data()
+        self.assertEqual(len(subscriptions), 1)
+        self.assertEqual(subscriptions[0].name, "Netflix")
+        self.assertEqual(subscriptions[0].cost, 15.99)
+        self.assertEqual(subscriptions[0].cycle, "monthly")
+        self.assertEqual(subscriptions[0].next_date, "2027-12-01")
+        self.assertEqual(subscriptions[0].category, "Entertainment")
+        self.assertIn("9. Export Report", output.getvalue())
+        self.assertIn("Goodbye.", output.getvalue())
+
+    def test_existing_add_subcommand_still_works(self):
+        from src import main as app
+
+        with patch("sys.argv", [
+                "src.main", "add", "CLI Plan", "8.50", "yearly",
+                "2027-11-01", "--category", "Software"]), \
+                patch("sys.stdout", io.StringIO()):
+            app.main()
+
+        subscriptions = storage.load_data()
+        self.assertEqual(len(subscriptions), 1)
+        self.assertEqual(subscriptions[0].name, "CLI Plan")
+        self.assertEqual(subscriptions[0].category, "Software")
+
+    def test_menu_retries_invalid_choices_and_returns_from_view(self):
+        from src import main as app
+
+        answers = iter(["", "not-a-number", "17", "2", "0"])
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return next(answers)
+
+        output = io.StringIO()
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=respond), \
+                patch("sys.stdout", output):
+            app.main()
+
+        self.assertEqual(prompts.count("\nSelect an option: "), 5)
+        self.assertIn("Please choose an option from 0 to 9.", output.getvalue())
+        self.assertIn("No subscriptions found.", output.getvalue())
+        self.assertIn("Goodbye.", output.getvalue())
+
+    def test_add_retries_invalid_fields_in_place(self):
+        from src import main as app
+
+        answers = iter([
+            "1", "", "Plan", "not-a-number", "0", "-5", "nan", "inf",
+            "1e309", "18.00", "quarterly", "yearly", "", "not-a-date",
+            "2026-1-1", "2020-01-01", "Gaming", "Software", "0",
+        ])
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return next(answers)
+
+        output = io.StringIO()
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=respond), \
+                patch("sys.stdout", output):
+            app.main()
+
+        subscription = storage.load_data()[0]
+        self.assertEqual(subscription.name, "Plan")
+        self.assertEqual(subscription.cost, 18.0)
+        self.assertEqual(subscription.cycle, "yearly")
+        self.assertEqual(subscription.category, "Software")
+        self.assertGreaterEqual(date.fromisoformat(subscription.next_date), date.today())
+        self.assertEqual(prompts.count("Subscription name: "), 2)
+        self.assertEqual(prompts.count("Cost: $"), 7)
+        self.assertEqual(prompts.count("Billing cycle (monthly/yearly): "), 2)
+        self.assertEqual(prompts.count("Next renewal date (YYYY-MM-DD): "), 4)
+        self.assertEqual(
+            prompts.count(
+                "Category (Entertainment, Education, Productivity, Cloud Storage, Software, Other) [Other]: "
+            ),
+            2,
+        )
+        self.assertIn("Added subscription: Plan", output.getvalue())
+
+    def test_update_retries_id_and_each_invalid_field(self):
+        from src import main as app
+
+        manager.add_subscription("Existing", 12.0, "monthly", "2027-12-01")
+        answers = iter([
+            "3", "not-an-id", "99", "1", "   ", "Renamed",
+            "invalid-cost", "0", "-5", "22.00", "quarterly", "yearly",
+            "not-a-date", "2027-11-01", "Gaming", "Software", "0",
+        ])
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return next(answers)
+
+        output = io.StringIO()
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=respond), \
+                patch("sys.stdout", output):
+            app.main()
+
+        subscription = storage.load_data()[0]
+        self.assertEqual(subscription.name, "Renamed")
+        self.assertEqual(subscription.cost, 22.0)
+        self.assertEqual(subscription.cycle, "yearly")
+        self.assertEqual(subscription.next_date, "2027-11-01")
+        self.assertEqual(subscription.category, "Software")
+        self.assertEqual(
+            prompts.count("Subscription ID to update (blank to cancel): "), 3
+        )
+        self.assertEqual(prompts.count("New name: "), 2)
+        self.assertEqual(prompts.count("New cost: $"), 4)
+        self.assertEqual(prompts.count("New billing cycle (monthly/yearly): "), 2)
+        self.assertEqual(prompts.count("New renewal date (YYYY-MM-DD): "), 2)
+        self.assertEqual(
+            prompts.count(
+                "New category (Entertainment, Education, Productivity, Cloud Storage, Software, Other): "
+            ),
+            2,
+        )
+        self.assertIn("Updated subscription ID: 1", output.getvalue())
+
+    def test_update_can_skip_optional_fields(self):
+        from src import main as app
+
+        manager.add_subscription("Existing", 12.0, "monthly", "2027-12-01")
+        answers = ["3", "1", "", "", "", "", "", "0"]
+        output = io.StringIO()
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=answers), \
+                patch("sys.stdout", output):
+            app.main()
+
+        subscription = storage.load_data()[0]
+        self.assertEqual(subscription.name, "Existing")
+        self.assertEqual(subscription.cost, 12.0)
+        self.assertIn("No fields specified.", output.getvalue())
+
+    def test_delete_retries_id_and_confirmation(self):
+        from src import main as app
+
+        manager.add_subscription("Existing", 12.0, "monthly", "2027-12-01")
+        answers = iter([
+            "4", "bad-id", "99", "1", "maybe", "no",
+            "4", "1", "yes", "0",
+        ])
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return next(answers)
+
+        output = io.StringIO()
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=respond), \
+                patch("sys.stdout", output):
+            app.main()
+
+        self.assertEqual(storage.load_data(), [])
+        self.assertEqual(
+            prompts.count("Subscription ID to delete (blank to cancel): "), 4
+        )
+        self.assertEqual(prompts.count("Delete subscription 1? [y/N]: "), 3)
+        self.assertIn("Please answer yes or no.", output.getvalue())
+        self.assertIn("Deletion cancelled.", output.getvalue())
+        self.assertIn("Deleted subscription ID: 1", output.getvalue())
+
+    def test_savings_retries_empty_and_invalid_selections(self):
+        from src import main as app
+
+        manager.add_subscription("Monthly", 10.0, "monthly", "2027-12-01")
+        manager.add_subscription("Annual", 120.0, "yearly", "2027-12-01")
+        answers = iter(["8", "", "1,99", "abc", "1, 2", "0"])
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return next(answers)
+
+        output = io.StringIO()
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=respond), \
+                patch("sys.stdout", output):
+            app.main()
+
+        self.assertEqual(prompts.count("  IDs > "), 4)
+        self.assertIn("No IDs entered", output.getvalue())
+        self.assertIn("ID 99 does not exist.", output.getvalue())
+        self.assertIn("'abc' is not a valid integer ID.", output.getvalue())
+        self.assertIn("Potential Monthly Savings:  $20.00", output.getvalue())
+        self.assertIn("Goodbye.", output.getvalue())
 
 
 if __name__ == '__main__':

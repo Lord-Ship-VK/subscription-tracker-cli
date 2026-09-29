@@ -120,19 +120,22 @@ def run_savings_analyzer():
     print("separated by commas (e.g.  1, 3, 5):")
     print()
 
-    try:
-        ids_input = input("  IDs > ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print("\nCancelled.")
-        return
+    while True:
+        try:
+            ids_input = input("  IDs > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return
 
-    result = calculate_savings(subs, ids_input)
+        result = calculate_savings(subs, ids_input)
 
-    if result["errors"]:
+        if not result["errors"]:
+            break
+
         print()
         for err in result["errors"]:
             print(f"  Error: {err}")
-        return
+        print("Please try again.")
 
     # Print savings report
     print()

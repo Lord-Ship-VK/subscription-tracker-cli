@@ -2,6 +2,7 @@
 Utility functions for validation and formatting, and renewal-date arithmetic.
 """
 import calendar
+import math
 from datetime import datetime, date
 from .models import VALID_CATEGORIES, DEFAULT_CATEGORY
 
@@ -13,7 +14,9 @@ from .models import VALID_CATEGORIES, DEFAULT_CATEGORY
 def validate_date(date_str: str) -> str:
     """Validates if a string is a valid YYYY-MM-DD date."""
     try:
-        datetime.strptime(date_str, "%Y-%m-%d")
+        parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
+        if parsed_date.strftime("%Y-%m-%d") != date_str:
+            raise ValueError
         return date_str
     except ValueError:
         raise ValueError("Date must be in YYYY-MM-DD format.")
@@ -21,7 +24,7 @@ def validate_date(date_str: str) -> str:
 
 def validate_cost(cost: float) -> float:
     """Validates if the cost is a positive number."""
-    if cost <= 0:
+    if not math.isfinite(cost) or cost <= 0:
         raise ValueError("Cost must be positive.")
     return cost
 

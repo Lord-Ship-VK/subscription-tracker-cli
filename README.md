@@ -44,7 +44,14 @@ This project was built as a comprehensive Python Essentials academic project, de
 
 ## Usage
 
-Run the application as a Python module from the root directory:
+Run the application as a Python module from the root directory. With no
+command, SmartSub opens an interactive menu:
+
+```bash
+python3 -m src.main
+```
+
+The existing command-line subcommands remain available:
 
 ```bash
 python3 -m src.main <command> [arguments]
