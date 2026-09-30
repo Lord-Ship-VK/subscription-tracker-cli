@@ -6,7 +6,8 @@ that takes an already-loaded list of Subscription objects and returns a
 filtered list.  ``run_search()`` owns the I/O: loading data, calling the
 filter, and printing results.
 """
-from .storage import load_data
+from .storage import load_data, get_currency
+from .utils import format_currency
 
 
 def filter_subscriptions(subscriptions: list,
@@ -67,13 +68,14 @@ def run_search(term: str = None, category: str = None):
         return
 
     print(
-        f"{'ID':<5} | {'Name':<20} | {'Cost':<10} | "
+        f"{'ID':<5} | {'Name':<20} | {'Cost':<14} | "
         f"{'Cycle':<10} | {'Next Billing':<14} | {'Category'}"
     )
-    print("-" * 82)
+    print("-" * 86)
     for sub in results:
         print(
-            f"{sub.sub_id:<5} | {sub.name:<20} | ${sub.cost:<9.2f} | "
+            f"{sub.sub_id:<5} | {sub.name:<20} | "
+            f"{format_currency(sub.cost, get_currency()):<14} | "
             f"{sub.cycle:<10} | {sub.next_date:<14} | {sub.category}"
         )
     print(f"\n{len(results)} result(s) found.")

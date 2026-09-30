@@ -5,9 +5,11 @@ __pycache__/
 
 # Runtime data
 data/subscriptions.json
+data/users/
 
 # Generated reports
 reports/*.csv
+reports/*/
 
 # OS files
 .DS_Store

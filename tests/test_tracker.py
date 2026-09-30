@@ -10,6 +10,11 @@ from src import storage, manager, analytics, alerts, utils
 
 class TestSubscriptionTracker(unittest.TestCase):
     def setUp(self):
+        self.original_user_data_dir = storage.USER_DATA_DIR
+        self.original_user_id = storage.ACTIVE_USER_ID
+        self.temp_user_dir = tempfile.TemporaryDirectory()
+        storage.set_user_data_dir(self.temp_user_dir.name)
+        storage.set_user_id("default")
         # Create a temporary file for tests to isolate from real data
         self.fd, self.temp_file = tempfile.mkstemp(suffix='.json')
         storage.set_data_file(self.temp_file)
@@ -21,6 +26,9 @@ class TestSubscriptionTracker(unittest.TestCase):
     def tearDown(self):
         os.close(self.fd)
         os.remove(self.temp_file)
+        storage.ACTIVE_USER_ID = self.original_user_id
+        storage.USER_DATA_DIR = self.original_user_data_dir
+        self.temp_user_dir.cleanup()
 
     def test_add_subscription(self):
         manager.add_subscription("Test", 10.0, "monthly", "2026-10-01")
@@ -98,6 +106,11 @@ class TestCategoryFeature(unittest.TestCase):
     """Tests for subscription category support."""
 
     def setUp(self):
+        self.original_user_data_dir = storage.USER_DATA_DIR
+        self.original_user_id = storage.ACTIVE_USER_ID
+        self.temp_user_dir = tempfile.TemporaryDirectory()
+        storage.set_user_data_dir(self.temp_user_dir.name)
+        storage.set_user_id("default")
         self.fd, self.temp_file = tempfile.mkstemp(suffix='.json')
         storage.set_data_file(self.temp_file)
         with open(self.temp_file, 'w') as f:
@@ -106,6 +119,9 @@ class TestCategoryFeature(unittest.TestCase):
     def tearDown(self):
         os.close(self.fd)
         os.remove(self.temp_file)
+        storage.ACTIVE_USER_ID = self.original_user_id
+        storage.USER_DATA_DIR = self.original_user_data_dir
+        self.temp_user_dir.cleanup()
 
     # ------------------------------------------------------------------
     # Category creation
@@ -704,6 +720,19 @@ class TestExportReport(unittest.TestCase):
         self.assertEqual(rows[0][1], "Netflix")
         self.assertEqual(rows[0][2], "15.99")
 
+    def test_csv_records_selected_currency(self):
+        import csv as csv_mod
+        from src.export import generate_report
+        self._add_subs()
+        generate_report(storage.load_data(), self.csv_path, currency="INR")
+
+        with open(self.csv_path, 'r') as f:
+            reader = csv_mod.reader(f)
+            next(reader)
+            rows = list(reader)
+
+        self.assertEqual(rows[0][8], "INR")
+
     # ------------------------------------------------------------------
     # Monthly / yearly equivalents
     # ------------------------------------------------------------------
@@ -770,12 +799,17 @@ class TestInteractiveMenu(unittest.TestCase):
     def setUp(self):
         self.fd, self.temp_file = tempfile.mkstemp(suffix='.json')
         self.original_data_file = storage.DATA_FILE
+        self.original_user_data_dir = storage.USER_DATA_DIR
+        self.temp_user_dir = tempfile.TemporaryDirectory()
+        storage.set_user_data_dir(self.temp_user_dir.name)
         storage.set_data_file(self.temp_file)
         with open(self.temp_file, 'w') as f:
             f.write("[]")
 
     def tearDown(self):
         storage.set_data_file(self.original_data_file)
+        storage.USER_DATA_DIR = self.original_user_data_dir
+        self.temp_user_dir.cleanup()
         os.close(self.fd)
         os.remove(self.temp_file)
 
@@ -784,11 +818,17 @@ class TestInteractiveMenu(unittest.TestCase):
 
         output = io.StringIO()
         answers = [
-            "1", "Netflix", "15.99", "monthly", "2027-12-01",
+            "default", "1", "Netflix", "", "15.99", "monthly", "2027-12-01",
             "Entertainment", "0",
         ]
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return answers.pop(0)
+
         with patch("sys.argv", ["src.main"]), \
-                patch("builtins.input", side_effect=answers), \
+                patch("builtins.input", side_effect=respond), \
                 patch("sys.stdout", output):
             app.main()
 
@@ -799,8 +839,35 @@ class TestInteractiveMenu(unittest.TestCase):
         self.assertEqual(subscriptions[0].cycle, "monthly")
         self.assertEqual(subscriptions[0].next_date, "2027-12-01")
         self.assertEqual(subscriptions[0].category, "Entertainment")
+        self.assertEqual(prompts[0], "User ID (name): ")
+        self.assertLess(
+            prompts.index("Set currency before cost (USD/INR, blank keeps USD): "),
+            prompts.index("Cost: $"),
+        )
         self.assertIn("9. Export Report", output.getvalue())
         self.assertIn("Goodbye.", output.getvalue())
+
+    def test_currency_can_be_changed_immediately_before_cost(self):
+        from src import main as app
+
+        answers = ["alice", "1", "Plan", "INR", "10.00", "monthly",
+                   "2027-12-01", "", "0"]
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return answers.pop(0)
+
+        with patch("sys.argv", ["src.main"]), \
+                patch("builtins.input", side_effect=respond), \
+                patch("sys.stdout", io.StringIO()):
+            app.main()
+
+        self.assertLess(
+            prompts.index("Set currency before cost (USD/INR, blank keeps USD): "),
+            prompts.index("Cost (INR): "),
+        )
+        self.assertEqual(storage.get_currency(), "INR")
 
     def test_existing_add_subcommand_still_works(self):
         from src import main as app
@@ -819,7 +886,7 @@ class TestInteractiveMenu(unittest.TestCase):
     def test_menu_retries_invalid_choices_and_returns_from_view(self):
         from src import main as app
 
-        answers = iter(["", "not-a-number", "17", "2", "0"])
+        answers = iter(["default", "", "not-a-number", "17", "2", "0"])
         prompts = []
 
         def respond(prompt):
@@ -833,7 +900,7 @@ class TestInteractiveMenu(unittest.TestCase):
             app.main()
 
         self.assertEqual(prompts.count("\nSelect an option: "), 5)
-        self.assertIn("Please choose an option from 0 to 9.", output.getvalue())
+        self.assertIn("Please choose an option from 0 to 10.", output.getvalue())
         self.assertIn("No subscriptions found.", output.getvalue())
         self.assertIn("Goodbye.", output.getvalue())
 
@@ -841,7 +908,7 @@ class TestInteractiveMenu(unittest.TestCase):
         from src import main as app
 
         answers = iter([
-            "1", "", "Plan", "not-a-number", "0", "-5", "nan", "inf",
+            "default", "1", "", "Plan", "", "not-a-number", "0", "-5", "nan", "inf",
             "1e309", "18.00", "quarterly", "yearly", "", "not-a-date",
             "2026-1-1", "2020-01-01", "Gaming", "Software", "0",
         ])
@@ -880,7 +947,7 @@ class TestInteractiveMenu(unittest.TestCase):
 
         manager.add_subscription("Existing", 12.0, "monthly", "2027-12-01")
         answers = iter([
-            "3", "not-an-id", "99", "1", "   ", "Renamed",
+            "default", "3", "not-an-id", "99", "1", "   ", "Renamed", "",
             "invalid-cost", "0", "-5", "22.00", "quarterly", "yearly",
             "not-a-date", "2027-11-01", "Gaming", "Software", "0",
         ])
@@ -921,7 +988,7 @@ class TestInteractiveMenu(unittest.TestCase):
         from src import main as app
 
         manager.add_subscription("Existing", 12.0, "monthly", "2027-12-01")
-        answers = ["3", "1", "", "", "", "", "", "0"]
+        answers = ["default", "3", "1", "", "", "", "", "", "", "0"]
         output = io.StringIO()
         with patch("sys.argv", ["src.main"]), \
                 patch("builtins.input", side_effect=answers), \
@@ -938,7 +1005,7 @@ class TestInteractiveMenu(unittest.TestCase):
 
         manager.add_subscription("Existing", 12.0, "monthly", "2027-12-01")
         answers = iter([
-            "4", "bad-id", "99", "1", "maybe", "no",
+            "default", "4", "bad-id", "99", "1", "maybe", "no",
             "4", "1", "yes", "0",
         ])
         prompts = []
@@ -967,7 +1034,7 @@ class TestInteractiveMenu(unittest.TestCase):
 
         manager.add_subscription("Monthly", 10.0, "monthly", "2027-12-01")
         manager.add_subscription("Annual", 120.0, "yearly", "2027-12-01")
-        answers = iter(["8", "", "1,99", "abc", "1, 2", "0"])
+        answers = iter(["default", "8", "", "1,99", "abc", "1, 2", "0"])
         prompts = []
 
         def respond(prompt):
@@ -986,6 +1053,92 @@ class TestInteractiveMenu(unittest.TestCase):
         self.assertIn("'abc' is not a valid integer ID.", output.getvalue())
         self.assertIn("Potential Monthly Savings:  $20.00", output.getvalue())
         self.assertIn("Goodbye.", output.getvalue())
+
+
+class TestUserProfiles(unittest.TestCase):
+    """Tests for isolated user data and per-user display preferences."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_state = (
+            storage.DATA_FILE,
+            storage.USER_DATA_DIR,
+            storage.ACTIVE_USER_ID,
+            storage._DATA_FILE_OVERRIDE,
+        )
+        storage._DATA_FILE_OVERRIDE = False
+        storage.set_user_data_dir(self.temp_dir.name)
+        storage.set_user_id("alice")
+
+    def tearDown(self):
+        (
+            storage.DATA_FILE,
+            storage.USER_DATA_DIR,
+            storage.ACTIVE_USER_ID,
+            storage._DATA_FILE_OVERRIDE,
+        ) = self.original_state
+        self.temp_dir.cleanup()
+
+    def test_subscription_data_is_isolated_by_user_id(self):
+        manager.add_subscription("Alice Plan", 10.0, "monthly", "2027-10-01")
+        storage.set_user_id("bob")
+        self.assertEqual(storage.load_data(), [])
+
+        manager.add_subscription("Bob Plan", 20.0, "monthly", "2027-10-01")
+        storage.set_user_id("alice")
+        self.assertEqual([sub.name for sub in storage.load_data()], ["Alice Plan"])
+
+    def test_currency_is_saved_separately_for_each_user(self):
+        storage.set_currency("INR")
+        storage.set_user_id("bob")
+        self.assertEqual(storage.get_currency(), "USD")
+        storage.set_currency("USD")
+
+        storage.set_user_id("alice")
+        self.assertEqual(storage.get_currency(), "INR")
+        self.assertEqual(utils.format_currency(25.5, storage.get_currency()), "INR 25.50")
+
+    def test_currency_command_sets_display_currency(self):
+        from src import main as app
+
+        output = io.StringIO()
+        with patch("sys.argv", [
+                "src.main", "currency", "INR", "--user-id", "alice"]), \
+                patch("sys.stdout", output):
+            app.main()
+
+        self.assertIn("Currency set to INR.", output.getvalue())
+        self.assertEqual(storage.get_currency(), "INR")
+
+    def test_analytics_uses_selected_currency(self):
+        storage.set_currency("INR")
+        manager.add_subscription("Local Plan", 10.0, "monthly", "2027-10-01")
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            analytics.show_analytics()
+
+        self.assertIn("Total Monthly Cost:    INR 10.00", output.getvalue())
+
+    def test_invalid_user_id_is_rejected(self):
+        with self.assertRaises(ValueError):
+            storage.set_user_id("../other")
+
+    def test_user_id_option_works_before_and_after_subcommand(self):
+        from src import main as app
+
+        with patch("sys.argv", [
+                "src.main", "--user-id", "alice", "add", "Alice Plan", "10",
+                "monthly", "2027-10-01"]), patch("sys.stdout", io.StringIO()):
+            app.main()
+
+        output = io.StringIO()
+        with patch("sys.argv", ["src.main", "list", "--user-id", "bob"]), \
+                patch("sys.stdout", output):
+            app.main()
+
+        self.assertIn("No subscriptions found.", output.getvalue())
+        storage.set_user_id("alice")
+        self.assertEqual([sub.name for sub in storage.load_data()], ["Alice Plan"])
 
 
 if __name__ == '__main__':

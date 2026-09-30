@@ -29,6 +29,13 @@ def validate_cost(cost: float) -> float:
     return cost
 
 
+def format_currency(amount: float, currency: str = "USD") -> str:
+    """Format an amount using the selected currency without converting it."""
+    if currency == "INR":
+        return f"INR {amount:.2f}"
+    return f"${amount:.2f}"
+
+
 def validate_name(name: str) -> str:
     """Validates if the name is not empty."""
     if not name.strip():

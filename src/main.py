@@ -10,7 +10,8 @@ from .search import run_search
 from .export import run_export
 from .utils import validate_date, validate_cost, validate_name, validate_category
 from .models import VALID_CATEGORIES, DEFAULT_CATEGORY
-from .storage import load_data
+from . import storage
+from .storage import load_data, get_currency
 
 
 def _prompt_validated(prompt, validator, optional=False):
@@ -31,6 +32,34 @@ def _validate_interactive_cost(value):
     except ValueError:
         raise ValueError("Cost must be a valid number.")
     return validate_cost(cost)
+
+
+def _currency_cost_prompt(field):
+    if get_currency() == "USD":
+        return f"{field}: $"
+    return f"{field} (INR): "
+
+
+def _prompt_currency_before_cost():
+    while True:
+        value = input(
+            f"Set currency before cost (USD/INR, blank keeps {get_currency()}): "
+        )
+        if not value.strip():
+            return
+        try:
+            currency = _validate_currency(value)
+            storage.set_currency(currency)
+            return
+        except ValueError as error:
+            print(f"Error: {error}")
+
+
+def _validate_currency(value):
+    currency = value.strip().upper()
+    if currency not in ("USD", "INR"):
+        raise ValueError("Currency must be USD or INR.")
+    return currency
 
 
 def _validate_cycle(value):
@@ -64,7 +93,10 @@ def _prompt_existing_subscription_id(prompt):
 def _interactive_add_subscription():
     """Prompt for a subscription and pass validated values to the manager."""
     name = _prompt_validated("Subscription name: ", validate_name)
-    cost = _prompt_validated("Cost: $", _validate_interactive_cost)
+    _prompt_currency_before_cost()
+    cost = _prompt_validated(
+        _currency_cost_prompt("Cost"), _validate_interactive_cost
+    )
     cycle = _prompt_validated("Billing cycle (monthly/yearly): ", _validate_cycle)
     next_date = _prompt_validated(
         "Next renewal date (YYYY-MM-DD): ",
@@ -87,10 +119,17 @@ def _interactive_update_subscription():
         return
     print("Leave a field blank to keep its current value.")
 
+    name = _prompt_validated("New name: ", validate_name, optional=True)
+    _prompt_currency_before_cost()
+    cost = _prompt_validated(
+        _currency_cost_prompt("New cost"),
+        _validate_interactive_cost,
+        optional=True,
+    )
     update_subscription(
         sub_id,
-        name=_prompt_validated("New name: ", validate_name, optional=True),
-        cost=_prompt_validated("New cost: $", _validate_interactive_cost, optional=True),
+        name=name,
+        cost=cost,
         cycle=_prompt_validated(
             "New billing cycle (monthly/yearly): ", _validate_cycle, optional=True
         ),
@@ -126,6 +165,21 @@ def _interactive_delete_subscription():
         print("Please answer yes or no.")
 
 
+def _interactive_set_currency():
+    while True:
+        value = input(f"Currency (USD/INR) [{get_currency()}], blank to cancel: ")
+        if not value.strip():
+            print("Cancelled.")
+            return
+        try:
+            currency = _validate_currency(value)
+            storage.set_currency(currency)
+            print(f"Currency set to {currency}.")
+            return
+        except ValueError as error:
+            print(f"Error: {error}")
+
+
 def interactive_menu():
     """Run the terminal application menu until the user exits."""
     actions = {
@@ -141,11 +195,15 @@ def interactive_menu():
         "7": check_alerts,
         "8": run_savings_analyzer,
         "9": run_export,
+        "10": _interactive_set_currency,
     }
 
     while True:
         print("\n" + "=" * 48)
-        print(" SmartSub | Subscription Expense Tracker")
+        print(
+            f" SmartSub | User: {storage.get_user_id()} | "
+            f"Currency: {get_currency()}"
+        )
         print("=" * 48)
         print("  1. Add Subscription")
         print("  2. View Subscriptions")
@@ -156,6 +214,7 @@ def interactive_menu():
         print("  7. Renewal Alerts")
         print("  8. Savings Analyzer")
         print("  9. Export Report")
+        print(" 10. Set Currency")
         print("  0. Exit")
         try:
             choice = input("\nSelect an option: ").strip()
@@ -164,7 +223,7 @@ def interactive_menu():
                 return
             action = actions.get(choice)
             if action is None:
-                print("Please choose an option from 0 to 9.")
+                print("Please choose an option from 0 to 10.")
                 continue
             action()
         except ValueError as error:
@@ -179,6 +238,12 @@ def interactive_menu():
 def main():
     """Parses command line arguments and routes to the appropriate function."""
     parser = argparse.ArgumentParser(description="Terminal-based Subscription Manager")
+    parser.add_argument(
+        "--user-id",
+        type=storage.validate_user_id,
+        default=None,
+        help="Select the local user profile (default: default)",
+    )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Add command
@@ -231,14 +296,54 @@ def main():
                                help="Filter by category")
 
     # Export command
-    subparsers.add_parser("export", help="Export subscription data to a CSV report")
+    parser_export = subparsers.add_parser(
+        "export", help="Export subscription data to a CSV report"
+    )
+
+    # Currency command
+    parser_currency = subparsers.add_parser(
+        "currency", help="Show or set the user's display currency"
+    )
+    parser_currency.add_argument(
+        "currency",
+        nargs="?",
+        choices=("USD", "INR"),
+        help="Currency to use for displayed amounts",
+    )
+
+    for command_parser in (
+        parser_add,
+        parser_update,
+        subparsers.choices["list"],
+        parser_delete,
+        subparsers.choices["analytics"],
+        subparsers.choices["alerts"],
+        subparsers.choices["savings"],
+        parser_search,
+        parser_export,
+        parser_currency,
+    ):
+        command_parser.add_argument(
+            "--user-id",
+            dest="user_id",
+            type=storage.validate_user_id,
+            default=argparse.SUPPRESS,
+            help="Select the local user profile",
+        )
 
     args = parser.parse_args()
 
     if args.command is None:
+        user_id = args.user_id
+        if user_id is None:
+            user_id = _prompt_validated("User ID (name): ", storage.validate_user_id)
+        storage.set_user_id(user_id)
         interactive_menu()
+        return
 
-    elif args.command == "add":
+    storage.set_user_id(args.user_id or "default")
+
+    if args.command == "add":
         try:
             name = validate_name(args.name)
             cost = validate_cost(args.cost)
@@ -279,6 +384,13 @@ def main():
 
     elif args.command == "export":
         run_export()
+
+    elif args.command == "currency":
+        if args.currency is None:
+            print(f"Currency: {get_currency()}")
+        else:
+            storage.set_currency(args.currency)
+            print(f"Currency set to {args.currency}.")
 
     else:
         parser.print_help()

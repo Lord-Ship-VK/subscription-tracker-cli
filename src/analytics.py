@@ -2,7 +2,8 @@
 Expense analytics logic.
 """
 from collections import defaultdict
-from .storage import load_data
+from .storage import load_data, get_currency
+from .utils import format_currency
 
 
 def monthly_cost(sub) -> float:
@@ -47,15 +48,16 @@ def show_analytics():
 
     print("--- Expense Analytics ---")
     print(f"Total Subscriptions:   {len(subs)}")
-    print(f"Total Monthly Cost:    ${monthly_total:.2f}")
-    print(f"Total Yearly Cost:     ${yearly_total:.2f}")
+    currency = get_currency()
+    print(f"Total Monthly Cost:    {format_currency(monthly_total, currency)}")
+    print(f"Total Yearly Cost:     {format_currency(yearly_total, currency)}")
 
     print("\n  Spending by Category (monthly equivalent):")
     for category, amount in sorted(by_category.items()):
-        print(f"    {category:<16} ${amount:.2f}")
+        print(f"    {category:<16} {format_currency(amount, currency)}")
 
     if most_expensive:
         print(
             f"\n  Most Expensive:        {most_expensive.name} "
-            f"(${most_expensive_monthly:.2f}/month)"
+            f"({format_currency(most_expensive_monthly, currency)}/month)"
         )

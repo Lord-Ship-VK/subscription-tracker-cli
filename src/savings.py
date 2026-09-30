@@ -12,8 +12,9 @@ straightforward to unit-test.
 subscription list, prompts the user, calls ``calculate_savings``, and
 prints the final report.
 """
-from .storage import load_data
+from .storage import load_data, get_currency
 from .analytics import monthly_cost
+from .utils import format_currency
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +113,7 @@ def run_savings_analyzer():
     print(f"  {'ID':<5} {'Name':<22} {'Cost':<12} {'Cycle':<10} {'Category'}")
     print("  " + "-" * 65)
     for sub in subs:
-        cost_str = f"${sub.cost:.2f}/{sub.cycle[:2]}"
+        cost_str = f"{format_currency(sub.cost, get_currency())}/{sub.cycle[:2]}"
         print(f"  {sub.sub_id:<5} {sub.name:<22} {cost_str:<12} {sub.cycle:<10} {sub.category}")
 
     print()
@@ -144,10 +145,20 @@ def run_savings_analyzer():
     print("  Subscriptions considered for cancellation:")
     for sub in result["selected"]:
         monthly = monthly_cost(sub)
-        print(f"    [{sub.sub_id}] {sub.name:<22} ${monthly:.2f}/month")
+        print(
+            f"    [{sub.sub_id}] {sub.name:<22} "
+            f"{format_currency(monthly, get_currency())}/month"
+        )
 
     print()
-    print(f"  Potential Monthly Savings:  ${result['monthly']:.2f}")
-    print(f"  Potential Yearly Savings:   ${result['yearly']:.2f}")
+    currency = get_currency()
+    print(
+        "  Potential Monthly Savings:  "
+        f"{format_currency(result['monthly'], currency)}"
+    )
+    print(
+        "  Potential Yearly Savings:   "
+        f"{format_currency(result['yearly'], currency)}"
+    )
     print()
     print("  Note: No subscriptions have been cancelled.")

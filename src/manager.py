@@ -1,8 +1,9 @@
 """
 Core business logic for managing subscriptions.
 """
-from .storage import load_data, save_data
+from .storage import load_data, save_data, get_currency
 from .models import Subscription, DEFAULT_CATEGORY
+from .utils import format_currency
 
 
 def add_subscription(
@@ -29,13 +30,14 @@ def list_subscriptions():
         return
 
     print(
-        f"{'ID':<5} | {'Name':<20} | {'Cost':<10} | "
+        f"{'ID':<5} | {'Name':<20} | {'Cost':<14} | "
         f"{'Cycle':<10} | {'Next Billing':<14} | {'Category'}"
     )
-    print("-" * 82)
+    print("-" * 86)
     for sub in subs:
         print(
-            f"{sub.sub_id:<5} | {sub.name:<20} | ${sub.cost:<9.2f} | "
+            f"{sub.sub_id:<5} | {sub.name:<20} | "
+            f"{format_currency(sub.cost, get_currency()):<14} | "
             f"{sub.cycle:<10} | {sub.next_date:<14} | {sub.category}"
         )
 

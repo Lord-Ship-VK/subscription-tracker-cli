@@ -8,8 +8,9 @@ a terminal summary.
 """
 import csv
 import os
-from .storage import load_data
+from .storage import load_data, get_currency, get_user_id
 from .analytics import monthly_cost
+from .utils import format_currency
 
 
 # Default output path, relative to the project root
@@ -25,10 +26,11 @@ CSV_HEADERS = [
     "Next Renewal Date",
     "Monthly Equivalent",
     "Yearly Equivalent",
+    "Currency",
 ]
 
 
-def generate_report(subscriptions: list, output_path: str) -> dict:
+def generate_report(subscriptions: list, output_path: str, currency: str = "USD") -> dict:
     """
     Write subscription data to a CSV file and return a summary dict.
 
@@ -66,6 +68,7 @@ def generate_report(subscriptions: list, output_path: str) -> dict:
                 sub.next_date,
                 f"{monthly:.2f}",
                 f"{yearly:.2f}",
+                currency,
             ])
 
     return {
@@ -83,7 +86,9 @@ def run_export(output_path: str = None):
     Called by the CLI ``export`` subcommand.
     """
     if output_path is None:
-        output_path = DEFAULT_REPORT_PATH
+        output_path = os.path.join(
+            BASE_DIR, "reports", get_user_id(), "subscription_report.csv"
+        )
 
     subs = load_data()
 
@@ -91,10 +96,15 @@ def run_export(output_path: str = None):
         print("No subscriptions found. Nothing to export.")
         return
 
-    summary = generate_report(subs, output_path)
+    currency = get_currency()
+    summary = generate_report(subs, output_path, currency)
 
     print("--- Export Report ---")
     print(f"File created:          {summary['path']}")
     print(f"Total Subscriptions:   {summary['total']}")
-    print(f"Total Monthly Cost:    ${summary['monthly']:.2f}")
-    print(f"Total Yearly Cost:     ${summary['yearly']:.2f}")
+    print(
+        f"Total Monthly Cost:    {format_currency(summary['monthly'], currency)}"
+    )
+    print(
+        f"Total Yearly Cost:     {format_currency(summary['yearly'], currency)}"
+    )

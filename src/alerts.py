@@ -2,7 +2,8 @@
 Alerts and notifications logic.
 """
 from datetime import datetime
-from .storage import load_data
+from .storage import load_data, get_currency
+from .utils import format_currency
 
 def check_alerts():
     """Checks for subscriptions renewing in the next 7 days."""
@@ -25,4 +26,7 @@ def check_alerts():
     else:
         for sub, days in upcoming:
             day_str = "today" if days == 0 else f"in {days} days"
-            print(f"Alert: {sub.name} renews {day_str} on {sub.next_date} for ${sub.cost:.2f}")
+            print(
+                f"Alert: {sub.name} renews {day_str} on {sub.next_date} "
+                f"for {format_currency(sub.cost, get_currency())}"
+            )
